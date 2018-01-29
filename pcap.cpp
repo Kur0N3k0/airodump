@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
 		}
 
 		/* Open the session in promiscuous mode */
-		handle = pcap_open_live(argv[1], BUFSIZ, 1, 1000, errbuf);
+		handle = pcap_open_live(argv[1], BUFSIZ, 1, 1, errbuf);
 		if (handle == NULL) {
 				fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
 				return(2);
@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 
 		printf("wireless gogo\n");
 			
-		wireless *wl = new wireless(handle);
+		wireless *wl = new wireless(handle, argv[1]);
 		wl->airodump();
 		
 		return(0);

@@ -1,70 +1,86 @@
 #include "wireless.h"
 
-wireless::wireless(pcap_t *handle) : handle(handle) { }
+wireless::wireless(pcap_t *handle, char *argv) : handle(handle), interface(argv) { }
+
+uint64_t tick;
 
 void wireless::airodump() {
+	int channels[] = { 1, 7, 13, 2, 8, 3, 9, 4, 10, 5, 11, 6, 12 };
+	static int chidx;
 	struct pcap_pkthdr *header;
 	const u_char *packet;
 	int res;
 
+	if(tick == 0)
+		tick = tickCount();
+
+	if(pcap_datalink(handle) != DLT_IEEE802_11_RADIO){
+		printf("no wireless(%d)\n", pcap_datalink(handle));
+		exit(-1);
+	}
+
 	while(1){   /* Grab a packet */
-		if(pcap_datalink(handle) != DLT_IEEE802_11_RADIO){
-			printf("no wireless(%d)\n", pcap_datalink(handle));
-			continue;
+		res = pcap_next_ex(handle, &header, (const u_char **)&packet);
+
+		if(tickCount() - tick >= 250){
+			string cmd = "iwconfig ";
+			cmd += interface;
+			cmd += " channel ";
+			
+			stringstream ss;
+			ss << channels[chidx];
+			cmd += ss.str();
+			chidx = (chidx + 1) % (sizeof(channels) / sizeof(int));
+
+			tick = tickCount();
+
+			system(cmd.c_str());
 		}
 
-		res = pcap_next_ex(handle, &header, (const u_char **)&packet);
 		if(res <= 0)
 			continue;
 
+		printf("\033[2J");
+		cout << "[Ch. " << channels[chidx] << "]" << endl;
+
 		parse((RadioTap *)packet, header->len);
-		system("clear");
 
-		map<BssID, WL_Element *> probe, beacon;
-
-		for(map<BssID, WL_Element *>::iterator iter = wlinfo.begin(); iter != wlinfo.end(); iter++){
+		// BSSID              PWR  Beacons    #Data, #/s  CH  MB   ENC  CIPHER AUTH ESSID
+		cout << "BSSID\t\t\tPWR\tBeacons\t#Data\t#/s\tCH\tMB\tENC\tCIPHER\tAUTH\tESSID" << endl;
+		string enc, cipher, auth;
+		for(map<string, WL_Element *>::iterator iter = beacon.begin(); iter != beacon.end(); iter++){
 			WL_Element *element = ((WL_Element *)((*iter).second));
-			uint16_t subtype = element->subtype;
-
-			if(subtype == BEACON_SUBTYPE_PROBE){
-				probe[iter->first] = iter->second;
-			}
-			else if(subtype == BEACON_SUBTYPE_FRAME){
-				beacon[iter->first] = iter->second;
-			}
-		}
-
-		printf("BSSID\t\t\tPWR\tBeacons\t#Data, #/s\tCH\tMB\tENC\tCIPHER\tAUTH\tESSID\n");
-		for(map<BssID, WL_Element *>::iterator iter = beacon.begin(); iter != beacon.end(); iter++){
-			WL_Element *element = ((WL_Element *)((*iter).second));
-			char *enc = "OPN";
+			if(element == NULL)
+				continue;
+			
+			enc = "OPN";
 			if(element->enc == ENC_AES)
 				enc = "WPA2";
 
-			char *cipher = "";
+			cipher = "";
 			if(element->cipher == CIPHER_CCMP)
 				cipher = "CCMP";
 
-			char *auth = "";
+			auth = "";
 			if(element->auth == AUTH_PSK)
 				auth = "PSK";
 			
-			uint8_t *ptr= (uint8_t *)&(*iter).first;
 			int i;
-			for(i = 0; i < 5; i++)
-				printf("%02x:", ptr[i] & 0xff);
+			string key = iter->first;
+			for(i = 10; i > 0; i -= 2)
+				printf("%c%c:", key[i], key[i + 1]);
 
-			printf("%02x\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t",
-					ptr[i] & 0xff,
+			printf("%c%c\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t",
+					key[i], key[i + 1],
 					element->power,
 					element->beacons,
 					element->data,
 					0,
 					element->channel,
 					(char)element->mb,
-					enc,
-					cipher,
-					auth);
+					enc.c_str(),
+					cipher.c_str(),
+					auth.c_str());
 			if(element->ssidlen == 0)
 				printf("<Length:0>\n");
 			else{
@@ -72,41 +88,41 @@ void wireless::airodump() {
 			}
 		}
 		puts("");
-		for(map<BssID, WL_Element *>::iterator iter = probe.begin(); iter != probe.end(); iter++){
+		//BSSID              STATION            PWR   Rate    Lost    Frames  Probe
+		cout << "BSSID\t\t\tSTATIONS\t\tPWR\tRate\tLost\tFrames\tProbe" << endl;
+		for(map<string, WL_Element *>::iterator iter = stat.begin(); iter != stat.end(); iter++){
 			WL_Element *element = ((WL_Element *)((*iter).second));
-			char *enc = "OPN";
-			if(element->enc == ENC_AES)
-				enc = "WPA2";
-
-			char *cipher = "";
-			if(element->cipher == CIPHER_CCMP)
-				cipher = "CCMP";
-
-			char *auth = "";
-			if(element->auth == AUTH_PSK)
-				auth = "PSK";
-
-			uint8_t *ptr= (uint8_t *)&(*iter).first;
-			int i;
-			for(i = 0; i < 5; i++)
-				printf("%02x:", ptr[i] & 0xff);
-
-			printf("%02x\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t",
-					ptr[i] & 0xff,
-					element->power,
-					element->beacons,
-					element->data,
-					0,
-					element->channel,
-					0,
-					enc,
-					cipher,
-					auth);
-			if(element->ssidlen == 0)
-				printf("<Length:0>\n");
-			else{
-				printf("%s\n", element->ssid);
+			if(element == NULL){
+				cout << "element is null" << endl;
+				continue;
 			}
+			string key = iter->first;
+			string bssid = "", station = "";
+			int i;
+			for(i = 10; i > 0; i -= 2){
+				bssid += key[i];
+			    bssid += key[i + 1];
+				bssid += ":";
+			}
+			bssid += key[i];
+			bssid += key[i + 1];
+
+			for(i = key.length() - 2; i > 12; i -= 2){
+				station += key[i];
+				station += key[i + 1];
+				station += ":";
+			}
+			station += key[i];
+			station += key[i + 1];
+
+			printf("%s\t%s\t%d\t%d\t%d\t%d\t%d\n",
+					bssid.c_str(),
+					station.c_str(),
+					element->power,
+					0,
+					0,
+					element->data,
+					0);
 		}	
 	}
 }
@@ -122,103 +138,76 @@ void wireless::parse(RadioTap *radiotap, uint32_t len) {
 	uint8_t type = BEACON_CONTROL_TYPE(beacon->control);
 	uint8_t subtype = BEACON_CONTROL_SUBTYPE(beacon->control);
 
-	BssID bssid;
-	memcpy(&bssid, beacon->bssid, 6);
+	if(type == BEACON_TYPE_DATA){
+		Data *data = (Data *)beacon;
+		BssID bssid;
+		memcpy(&bssid, data->receiver, 6);
 
-	map<BssID, WL_Element *>::iterator result = wlinfo.find(bssid);
-	WL_Element *element = NULL;
-	
-	if(result == wlinfo.end()){
-		element = new WL_Element;
-	} else {
-		element = result->second;
-	}
-	
+		BssID station;
+		memcpy(&station, data->transmitter, 6);
 
-    if(type == BEACON_TYPE_MANAGEMENT && subtype == BEACON_SUBTYPE_FRAME){
-		element->beacons++;
-	}
-	else if(type == BEACON_TYPE_DATA){
+		string bkey;
+		stringstream ss;
+		ss << hex << setfill('0') << setw(12) << bssid;
+		bkey = ss.str();
+
+		WL_Element *element = this->beacon[bkey];
+		if(element == NULL)
+			return;
+		element->data++;
+
+		if(subtype == 0)
+			return;
+		
+		stringstream ss2;
+		ss2 << hex << setfill('0') << setw(12) << station;
+		bkey += ss2.str();
+		element = this->stat[bkey];
+		if(element == NULL){
+			element = new WL_Element;
+			this->stat[bkey] = element;
+		}
 		element->data++;
 	}
+	else if(type == BEACON_TYPE_MANAGEMENT){
+		if(subtype == BEACON_SUBTYPE_FRAME){
+			BssID bssid;
+			memcpy(&bssid, beacon->bssid, 6);
 
+			string bkey;
+			stringstream ss;
+			ss << hex << setfill('0') << setw(12) << bssid;
+			bkey = ss.str();
 
-	RadioTapDetail *detail;
-	uint32_t size = 0;
-	char *dptr = (char *)radiotap->flags + sizeof(radiotap->flags);
+			WL_Element *element = this->beacon[bkey];
+			if(element == NULL){
+				element = new WL_Element;
 
-	detail = IS_RADIOTAP_TSFT(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_TSFT] : NULL;
-	if(detail != NULL){	size += detail->size; }
+				if(!memcmp(beacon->receiver, "\xff\xff\xff\xff\xff\xff", 6)){
+					this->beacon[bkey] = element;
+				}
+				else {
+					BssID station;
+					memcpy(&station, beacon->receiver, 6);
+					ss << station;
+					bkey = ss.str();
+					this->stat[bkey] = element;
+				}
+			}
 
-	detail = IS_RADIOTAP_FLAGS(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_FLAGS] : NULL;
-	if(detail != NULL){ size += detail->size; }
+			if(IS_RADIOTAP_ANTENA_SIGNAL(radiotap->flags[0])){
+				element->power = radiotap->signal2;
+			}
 
-	detail = IS_RADIOTAP_RATE(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_RATE] : NULL;
-	if(detail != NULL){
-		uint8_t rate;
-		memcpy(&rate, dptr + size, detail->align);
-		if(rate * 5 >= 0x80)
-			element->mb = 0xff;
-		else element->mb = rate * 5 / 10;
-		size += detail->size;
-	}
-	
-	detail = IS_RADIOTAP_CHANNEL(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_CHANNEL] : NULL;
-	if(detail != NULL){
-		uint16_t freq;
-		memcpy(&freq, dptr + size, detail->align);
-		element->channel = (freq - 2412) / 5 + 1;
+			/*for(int i = 0 ; i < 2; i++){
+				for(int k = 0; k < 16; k++){
+					printf("%02x ", (*((char*)beacon + i * 16 + k)) & 0xff);
+				}
+				printf("\n");
+			}*/
+			element->beacons++;
+			//getchar();
 
-		size += detail->size;
-	}
-	
-	detail = IS_RADIOTAP_FHSS(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_FHSS] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_ANTENA_SIGNAL(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_ANTENA_SIGNAL] : NULL;
-	if(detail != NULL){ 
-		memcpy(&element->power, dptr + size, detail->align);
-		size += detail->size;
-	}
-	
-	detail = IS_RADIOTAP_ANTENA_NOISE(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_ANTENA_NOISE] : NULL;
-	if(detail != NULL){ size += detail->size; }
-	
-	detail = IS_RADIOTAP_LOCK_QUAL(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_LOCK_QUAL] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_TX_ATTENU(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_TX_ATTENU] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_DB_TX_ATTENU(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_DB_TX_ATTENU] : NULL;
-	if(detail != NULL){ size += detail->size; }
-	
-	detail = IS_RADIOTAP_DBM_TX_POWER(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_DBM_TX_POWER] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_ANTENA(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_ANTENA] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_DB_ANTENA_SIGNAL(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_DB_ANTENA_SIGNAL] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_DB_ANTENA_NOISE(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_DB_ANTENA_NOISE] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_RX_FLAGS(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_RX_FLAGS] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_MCS_INFORMATION(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_MCS_INFORMATION] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_AMPDU_STATUS(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_AMPDU_STATUS] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	detail = IS_RADIOTAP_VHT_INFORMATION(radiotap->flags[0]) == 1 ? &rtDetail[RADIOTAP_VHT_INFORMATION] : NULL;
-	if(detail != NULL){ size += detail->size; }
-
-	if(type == BEACON_TYPE_MANAGEMENT){
-		if(subtype == BEACON_SUBTYPE_PROBE || subtype == BEACON_SUBTYPE_FRAME){
 			ManageFixed *fixed = (ManageFixed *)((char *)beacon + sizeof(Beacon));
 			FrameTag *tag = (FrameTag *)((char *)fixed + sizeof(ManageFixed));
 			TagRSNInfo *rsn;
@@ -239,7 +228,7 @@ void wireless::parse(RadioTap *radiotap, uint32_t len) {
 						element->cipher = rsn->pairwise.type;
 						element->auth = rsncipher->type;
 					case TAG_DS:
-						//element->channel = tag->data[0];
+						element->channel = tag->data[0];
 						break;
 					default:
 						break;
@@ -249,7 +238,6 @@ void wireless::parse(RadioTap *radiotap, uint32_t len) {
 
 			element->type = type;
 			element->subtype = subtype;
-			wlinfo[bssid] = element;
 		}
 	}
 }

@@ -13,6 +13,7 @@ typedef struct WL_ELEMENT {
 	uint32_t channel;
 	uint32_t ssidlen;
 	uint8_t ssid[SSID_MAX_LENGTH];
+	uint8_t station[SSID_MAX_LENGTH];
 	uint32_t beacons;
 	uint8_t mb;
 	uint8_t enc;
@@ -37,11 +38,20 @@ typedef struct BEACON {
 	uint8_t control;
 	uint8_t flags;
 	uint16_t duration;
-	uint8_t reciver[6];
+	uint8_t receiver[6];
 	uint8_t transmitter[6];
 	uint8_t bssid[6];
 	uint16_t frse;
 } Beacon;
+
+typedef struct DATA {
+	uint8_t control;
+	uint8_t flags;
+	uint16_t duration;
+	uint8_t receiver[6];
+	uint8_t transmitter[6];
+	uint8_t source[6];
+} Data;
 
 #define RADIOTAP_TSFT					0x00
 #define RADIOTAP_FLAGS				    0x01
@@ -203,6 +213,14 @@ typedef struct RadioTap {
 	uint8_t pad;
 	uint16_t length;
 	uint32_t flags[2];
+	uint64_t macstamp;
+	uint8_t flags2;
+	uint8_t drate;
+	uint16_t freq;
+	uint16_t cflags;
+	uint16_t signal;
+	uint16_t rxflags;
+	uint8_t signal2;
 } RadioTap;
 
 enum radiotap_flags {
@@ -337,23 +355,23 @@ enum radiotap_timestamp_flags {
 #define TAG_EXTENDED_SUPPORTED_RATE	0x32
 #define TAG_HT_INFORMATION			0x3d
 
-#pragma pack(1)
+#pragma pack(push, 1)
 typedef struct ManageFixed {
 	uint64_t timestamp;
 	uint16_t interval;
 	uint16_t capainfo;
 } ManageFixed;
-#pragma pack()
+#pragma pack(pop)
 
 #define TAG_MAX_LENGTH 0xff
 
-#pragma pack(1)
+#pragma pack(push, 1)
 typedef struct FrameTag {
 	uint8_t num;
 	uint8_t length;
 	char data[TAG_MAX_LENGTH];
 } FrameTag;
-#pragma pack()
+#pragma pack(pop)
 
 #define ENC_AES			0x04
 #define CIPHER_CCMP		0x04
@@ -364,7 +382,7 @@ typedef struct RSNCipher {
 	uint8_t type;
 } RSNCipher;
 
-#pragma pack(1)
+#pragma pack(push, 1)
 typedef struct TagRSNInfo {
 	uint16_t version;
 	
@@ -375,6 +393,6 @@ typedef struct TagRSNInfo {
 
 	uint16_t akm_count;
 } TagRSAInfo;
-#pragma pack()
+#pragma pack(pop)
 
 #endif
